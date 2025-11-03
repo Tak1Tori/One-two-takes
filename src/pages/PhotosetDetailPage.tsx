@@ -4,7 +4,7 @@ import { ArrowLeft, X, ChevronLeft, ChevronRight, Instagram, Youtube, Facebook, 
 import { useLanguage } from '../contexts/LanguageContext';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import CookieBanner from '../components/CookieBanner';
+
 
 interface DriveFile {
   id: string;

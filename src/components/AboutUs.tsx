@@ -17,7 +17,7 @@ const AboutUs: React.FC = () => {
   const [loading, setLoading] = useState(true);
 
   const API_KEY = import.meta.env.VITE_GOOGLE_DRIVE_API_KEY;
-  const FOLDER_ID = '1V4c-2EH8Sl4UIaHYhIawub13mgj4m29S';
+  const FOLDER_ID = import.meta.env.VITE_ABOUTUS_FOLDER_ID ;
 
   useEffect(() => {
     fetchImagesFromGoogleDrive();
