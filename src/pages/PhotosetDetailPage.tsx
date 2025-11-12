@@ -498,46 +498,26 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
       <Footer />
 
       {/* Modal for full-size media */}
+      
+      {/* Modal for full-size media */}
       {selectedMediaIndex !== null && (
-        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center">
-          <button
-            onClick={closeModal}
-            className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 z-60"
-          >
-            <X className="w-6 h-6" />
-          </button>
-
-          <button
-            onClick={prevMedia}
-            className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 z-60"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-
-          <button
-            onClick={nextMedia}
-            className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 z-60"
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
-
+        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center pointer-events-none">
           <div className="max-w-7xl max-h-[90vh] mx-auto px-6 w-full h-full">
-            <div className="relative w-full h-full flex items-center justify-center">
+            <div className="relative w-full h-full flex items-center justify-center pointer-events-auto">
               {getCurrentMedia()[selectedMediaIndex].mimeType.includes('video') ? (
                 // Вариант с iframe для видео
                 <div className="w-full h-full max-w-6xl max-h-[80vh]">
                   <iframe
-                    src={`https://drive.google.com/file/d/${getCurrentMedia()[selectedMediaIndex].id}/preview`}
+                    src={`https://drive.google.com/file/d/${getCurrentMedia()[selectedMediaIndex].id}/view`}
                     className="w-full h-full border-none rounded-lg"
                     allow="autoplay; fullscreen"
                     allowFullScreen
                     title={getCurrentMedia()[selectedMediaIndex].name}
-                    sandbox="allow-same-origin allow-scripts allow-popups allow-presentation"
                   />
                 </div>
               ) : (
                 // Изображение
-                <div className="max-w-full max-h-full">
+                <div className="w-full h-full flex items-center justify-center">
                   <img
                     src={getMediaUrl(getCurrentMedia()[selectedMediaIndex], 'full')}
                     alt={getCurrentMedia()[selectedMediaIndex].name}
@@ -559,8 +539,29 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
             </div>
           </div>
 
+          <button
+            onClick={closeModal}
+            className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
+          >
+            <X className="w-6 h-6" />
+          </button>
+
+          <button
+            onClick={prevMedia}
+            className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
+          >
+            <ChevronLeft className="w-6 h-6" />
+          </button>
+
+          <button
+            onClick={nextMedia}
+            className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
+          >
+            <ChevronRight className="w-6 h-6" />
+          </button>
+
           {/* Media counter */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/50 px-6 py-3 rounded-full text-center z-60">
+          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/50 px-6 py-3 rounded-full text-center pointer-events-none">
             <div className="text-sm text-gray-300">
               {selectedMediaIndex + 1} / {getCurrentMedia().length}
               {getCurrentMedia()[selectedMediaIndex].mimeType.includes('video') && (
