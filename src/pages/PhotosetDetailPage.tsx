@@ -5,7 +5,6 @@ import { useLanguage } from '../contexts/LanguageContext';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
 
-
 interface DriveFile {
   id: string;
   name: string;
@@ -26,7 +25,7 @@ interface SocialLink {
 
 interface PhotosetDetailPageProps {
   apiKey: string;
-  photosetsFolder: string;
+  photosetsFolder?: string;
 }
 
 const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
@@ -47,36 +46,45 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
   const [selectedMediaIndex, setSelectedMediaIndex] = useState<number | null>(null);
   const [mainVideo, setMainVideo] = useState<DriveFile | null>(null);
 
+  // Helper: return current category array
+  const getCurrentMedia = (): DriveFile[] => {
+    return mediaCategories[activeCategory] || [];
+  };
+
   useEffect(() => {
     const fetchPhotosetDetails = async () => {
       if (!photosetId) return;
 
       try {
-        // Get photoset folder name
+        setLoading(true);
+        setError(null);
+
+        // 1) Get folder (photoset) info (name)
         const folderResponse = await fetch(
           `https://www.googleapis.com/drive/v3/files/${photosetId}?key=${apiKey}&fields=name`
         );
 
         if (!folderResponse.ok) {
-          throw new Error('Failed to fetch photoset details');
+          throw new Error(`Failed to fetch photoset details (${folderResponse.status})`);
         }
 
         const folderData = await folderResponse.json();
-        setPhotosetName(folderData.name);
+        setPhotosetName(folderData.name || '');
 
-        // Get photos AND videos from the photoset folder
+        // 2) List media files (images + videos) in folder
+        // This query gets files with mimeType containing 'image' or 'video'
         const mediaResponse = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+(mimeType+contains+'image'+or+mimeType+contains+'video')&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=100`
+          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+(mimeType+contains+'image'+or+mimeType+contains+'video')&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=500`
         );
 
         if (!mediaResponse.ok) {
-          throw new Error('Failed to fetch media files');
+          throw new Error(`Failed to fetch media files (${mediaResponse.status})`);
         }
 
         const mediaData = await mediaResponse.json();
         const mediaFiles: DriveFile[] = mediaData.files || [];
 
-        // Categorize media files
+        // Categorize files
         const categories: MediaCategories = {
           photos: [],
           videos: [],
@@ -84,118 +92,137 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
         };
 
         mediaFiles.forEach(file => {
-          const fileName = file.name.toLowerCase();
+          const fileName = (file.name || '').toLowerCase();
 
           if (fileName.includes('backstage')) {
             categories.backstage.push(file);
-          } else if (file.mimeType.includes('video')) {
+          } else if ((file.mimeType || '').includes('video')) {
             categories.videos.push(file);
-          } else if (file.mimeType.includes('image')) {
+          } else if ((file.mimeType || '').includes('image')) {
             categories.photos.push(file);
           }
         });
 
         setMediaCategories(categories);
 
-        // Find main video (prioritize video with "backstage" in name, then first video)
-        // First look for backstage video in all videos (not just categorized ones)
+        // Determine mainVideo: prefer backstage video, otherwise first video
         const backstageVideo = mediaFiles.find(file =>
-          file.mimeType.includes('video') && file.name.toLowerCase().includes('backstage')
+          (file.mimeType || '').includes('video') && (file.name || '').toLowerCase().includes('backstage')
         );
         const mainVideoToShow = backstageVideo || categories.videos[0] || null;
         setMainVideo(mainVideoToShow);
 
-        // Get description from Google Docs file named "descriptions"
-        const docsResponse = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+name='descriptions'+and+mimeType='application/vnd.google-apps.document'&key=${apiKey}&fields=files(id,name,webContentLink)&pageSize=1`
+        // 3) Try to find a plain text "descriptions" file (.txt preferred)
+        // First search for plain text file named 'descriptions'
+        const descriptionsResponse = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+(name='descriptions' or name='descriptions.txt')&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=1`
         );
 
-        if (docsResponse.ok) {
-          const docsData = await docsResponse.json();
-          const descriptionDoc = docsData.files?.[0];
+        if (descriptionsResponse.ok) {
+          const descData = await descriptionsResponse.json();
+          const descFile = descData.files?.[0];
 
-          if (descriptionDoc) {
+          if (descFile) {
             try {
-              // Export the Google Doc as plain text
-              const textResponse = await fetch(
-                `https://www.googleapis.com/drive/v3/files/${descriptionDoc.id}/export?mimeType=text/plain&key=${apiKey}`
-              );
-
-              if (textResponse.ok) {
-                const descriptionText = await textResponse.text();
-                setDescription(descriptionText.trim());
+              // If it's plain text, fetch alt=media
+              if (descFile.mimeType === 'text/plain') {
+                const textResponse = await fetch(
+                  `https://www.googleapis.com/drive/v3/files/${descFile.id}?alt=media&key=${apiKey}`
+                );
+                if (textResponse.ok) {
+                  const descText = await textResponse.text();
+                  setDescription(descText.trim());
+                } else {
+                  // fallback empty
+                  setDescription('');
+                }
+              } else if (descFile.mimeType === 'application/vnd.google-apps.document') {
+                // If it's a Google Doc, attempt export -> note: may fail with API key depending on Google policy
+                try {
+                  const textResponse = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${descFile.id}/export?mimeType=text/plain&key=${apiKey}`
+                  );
+                  if (textResponse.ok) {
+                    const descText = await textResponse.text();
+                    setDescription(descText.trim());
+                  } else {
+                    // If export fails (likely with API key), fallback to empty string
+                    setDescription('');
+                  }
+                } catch {
+                  setDescription('');
+                }
+              } else {
+                setDescription('');
               }
-            } catch (docError) {
-              console.warn('Failed to load description from Google Docs:', docError);
-              // Fallback to default description
+            } catch {
               setDescription('');
             }
           } else {
-            // No description document found, use default
             setDescription('');
           }
         } else {
-          // Fallback to default description
           setDescription('');
         }
 
-        // Get social links from "other" file
-        const otherResponse = await fetch(
-          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+name='other'&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=1`
+        // 4) Social links: prefer plain text file named 'other' or 'social' etc.
+        const otherResp = await fetch(
+          `https://www.googleapis.com/drive/v3/files?q='${photosetId}'+in+parents+and+(name='other' or name='other.txt' or name='social' or name='social.txt')&key=${apiKey}&fields=files(id,name,mimeType)&pageSize=1`
         );
 
-        if (otherResponse.ok) {
-          const otherData = await otherResponse.json();
+        if (otherResp.ok) {
+          const otherData = await otherResp.json();
           const otherFile = otherData.files?.[0];
 
           if (otherFile) {
             try {
               let linksText = '';
 
-              if (otherFile.mimeType === 'application/vnd.google-apps.document') {
-                // Google Docs file
-                const textResponse = await fetch(
-                  `https://www.googleapis.com/drive/v3/files/${otherFile.id}/export?mimeType=text/plain&key=${apiKey}`
-                );
-                if (textResponse.ok) {
-                  linksText = await textResponse.text();
-                }
-              } else if (otherFile.mimeType === 'text/plain') {
-                // Plain text file
+              if (otherFile.mimeType === 'text/plain') {
                 const textResponse = await fetch(
                   `https://www.googleapis.com/drive/v3/files/${otherFile.id}?alt=media&key=${apiKey}`
                 );
                 if (textResponse.ok) {
                   linksText = await textResponse.text();
                 }
+              } else if (otherFile.mimeType === 'application/vnd.google-apps.document') {
+                // Attempt export (may fail with API key); prefer using .txt files in public mode
+                try {
+                  const textResponse = await fetch(
+                    `https://www.googleapis.com/drive/v3/files/${otherFile.id}/export?mimeType=text/plain&key=${apiKey}`
+                  );
+                  if (textResponse.ok) {
+                    linksText = await textResponse.text();
+                  }
+                } catch (err) {
+                  // ignore
+                }
               }
 
               if (linksText.trim()) {
-                // Parse links from text (expecting format like "instagram: https://instagram.com/...")
                 const links: SocialLink[] = [];
-                const lines = linksText.split('\n');
+                const lines = linksText.split(/\r?\n/);
 
                 lines.forEach(line => {
                   const trimmedLine = line.trim();
-                  if (trimmedLine && trimmedLine.includes(':') && trimmedLine.includes('http')) {
+                  // expecting "instagram: https://..."
+                  if (trimmedLine && trimmedLine.includes(':') && (trimmedLine.includes('http://') || trimmedLine.includes('https://'))) {
                     const colonIndex = trimmedLine.indexOf(':');
                     const platform = trimmedLine.substring(0, colonIndex).trim();
                     const url = trimmedLine.substring(colonIndex + 1).trim();
-
-                    if (platform && url && (url.startsWith('http://') || url.startsWith('https://'))) {
+                    if (platform && url) {
                       links.push({
-                        platform: platform.trim().toLowerCase(),
-                        url: url
+                        platform: platform.toLowerCase(),
+                        url
                       });
                     }
                   }
                 });
 
-                console.log('Parsed social links:', links); // Debug log
                 setSocialLinks(links);
               }
-            } catch (linksError) {
-              console.warn('Failed to load social links:', linksError);
+            } catch {
+              // ignore errors
             }
           }
         }
@@ -207,39 +234,50 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
     };
 
     fetchPhotosetDetails();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [photosetId, apiKey]);
 
+  // Build reliable URLs for thumbnails/previews/full view
   const getMediaUrl = (file: DriveFile, size: 'thumbnail' | 'full' = 'thumbnail') => {
-    // Для thumbnail всегда используем один формат
+    const id = file.id;
+    const mime = file.mimeType || '';
+
+    // Thumbnail attempt (works for many images; may not for all videos)
     if (size === 'thumbnail') {
-      return `https://drive.google.com/thumbnail?id=${file.id}&sz=w600-h600`;
+      // Try Drive thumbnail endpoint first (good for images)
+      // Fallback to uc?export=view which often returns image preview
+      return `https://drive.google.com/thumbnail?id=${id}&sz=w600-h600`;
     }
 
-    // Для полного размера
-    if (file.mimeType.includes('video')) {
-      // Для видео используем preview URL для iframe
-      return `https://drive.google.com/file/d/${file.id}/preview`;
+    // For full size
+    if (mime.includes('video')) {
+      // Use preview for embedding videos in iframe (preview supports embed)
+      return `https://drive.google.com/file/d/${id}/preview`;
     }
 
-    // Для изображений
-    return `https://drive.google.com/uc?export=view&id=${file.id}`;
+    // For images: return uc export view (good for full-resolution image)
+    return `https://drive.google.com/uc?export=view&id=${id}`;
   };
 
+  // Open modal for a specific index within a category
   const openModal = (index: number) => {
-    setSelectedMediaIndex(index);
+    const current = getCurrentMedia();
+    if (!current || current.length === 0) {
+      setSelectedMediaIndex(null);
+      return;
+    }
+    const safeIndex = Math.max(0, Math.min(index, current.length - 1));
+    setSelectedMediaIndex(safeIndex);
   };
 
   const closeModal = () => {
     setSelectedMediaIndex(null);
   };
 
-  const getCurrentMedia = () => {
-    return mediaCategories[activeCategory];
-  };
-
   const nextMedia = () => {
     if (selectedMediaIndex !== null) {
       const currentMedia = getCurrentMedia();
+      if (currentMedia.length === 0) return;
       setSelectedMediaIndex((selectedMediaIndex + 1) % currentMedia.length);
     }
   };
@@ -247,6 +285,7 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
   const prevMedia = () => {
     if (selectedMediaIndex !== null) {
       const currentMedia = getCurrentMedia();
+      if (currentMedia.length === 0) return;
       setSelectedMediaIndex(selectedMediaIndex === 0 ? currentMedia.length - 1 : selectedMediaIndex - 1);
     }
   };
@@ -266,6 +305,7 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
     }
   };
 
+  // If loading or error — render early
   if (loading) {
     return (
       <div className="min-h-screen bg-black">
@@ -337,7 +377,7 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
           <div className="w-full mb-16">
             <div className="relative w-full h-0 pb-[56.25%] bg-gray-900 rounded-lg overflow-hidden"> {/* 16:9 aspect ratio */}
               <iframe
-                src={`https://drive.google.com/file/d/${mainVideo.id}/preview`}
+                src={`https://drive.google.com/file/d/${mainVideo.id}/preview?rm=minimal`}
                 className="absolute top-0 left-0 w-full h-full border-none"
                 allow="autoplay; fullscreen"
                 allowFullScreen
@@ -371,9 +411,12 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
                     onError={(e) => {
                       const img = e.target as HTMLImageElement;
                       const fileId = file.id;
+                      // fallback chain for thumbnails: uc?export=view -> thumbnail with id param
                       if (!img.src.includes('uc?export=view')) {
                         img.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
-                      } else if (!img.src.includes('uc?id=')) {
+                      } else if (!img.src.includes('thumbnail')) {
+                        img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w600-h600`;
+                      } else {
                         img.src = `https://drive.google.com/uc?id=${fileId}`;
                       }
                     }}
@@ -390,6 +433,7 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
             </div>
           </div>
         )}
+
         {/* Photos Section */}
         {mediaCategories.photos.length > 0 && (
           <div className="mb-16">
@@ -426,8 +470,6 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
             </div>
           </div>
         )}
-
-
 
         {/* Backstage Section */}
         {mediaCategories.backstage.length > 0 && (
@@ -498,79 +540,84 @@ const PhotosetDetailPage: React.FC<PhotosetDetailPageProps> = ({ apiKey }) => {
       <Footer />
 
       {/* Modal for full-size media */}
-      
-      {/* Modal for full-size media */}
-      {selectedMediaIndex !== null && (
-        <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center pointer-events-none">
-          <div className="max-w-7xl max-h-[90vh] mx-auto px-6 w-full h-full">
-            <div className="relative w-full h-full flex items-center justify-center pointer-events-auto">
-              {getCurrentMedia()[selectedMediaIndex].mimeType.includes('video') ? (
-                // Вариант с iframe для видео
-                <div className="w-full h-full max-w-6xl max-h-[80vh]">
-                  <iframe
-                    src={`https://drive.google.com/file/d/${getCurrentMedia()[selectedMediaIndex].id}/view`}
-                    className="w-full h-full border-none rounded-lg"
-                    allow="autoplay; fullscreen"
-                    allowFullScreen
-                    title={getCurrentMedia()[selectedMediaIndex].name}
-                  />
-                </div>
-              ) : (
-                // Изображение
-                <div className="w-full h-full flex items-center justify-center">
-                  <img
-                    src={getMediaUrl(getCurrentMedia()[selectedMediaIndex], 'full')}
-                    alt={getCurrentMedia()[selectedMediaIndex].name}
-                    className="max-w-full max-h-full object-contain"
-                    onError={(e) => {
-                      const img = e.target as HTMLImageElement;
-                      const fileId = getCurrentMedia()[selectedMediaIndex].id;
-                      if (!img.src.includes('uc?export=view')) {
-                        img.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
-                      } else if (!img.src.includes('thumbnail')) {
-                        img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1920-h1080`;
-                      } else {
-                        img.src = `https://drive.google.com/uc?id=${fileId}`;
-                      }
-                    }}
-                  />
-                </div>
-              )}
+      {selectedMediaIndex !== null && (() => {
+        const current = getCurrentMedia();
+        // guard against empty current category
+        if (!current || current.length === 0 || selectedMediaIndex < 0 || selectedMediaIndex >= current.length) {
+          return null;
+        }
+        const file = current[selectedMediaIndex];
+
+        return (
+          <div className="fixed inset-0 bg-black/95 z-50 flex items-center justify-center">
+            <div className="max-w-7xl max-h-[90vh] mx-auto px-6 w-full h-full">
+              <div className="relative w-full h-full flex items-center justify-center">
+                {file.mimeType.includes('video') ? (
+                  <div className="w-full h-full max-w-6xl max-h-[80vh]">
+                    <iframe
+                      // IMPORTANT: use /preview for embedable url
+                      src={`https://drive.google.com/file/d/${file.id}/preview?rm=minimal`}
+                      className="w-full h-full border-none rounded-lg"
+                      allow="autoplay; fullscreen"
+                      allowFullScreen
+                      title={file.name}
+                    />
+                  </div>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center">
+                    <img
+                      src={getMediaUrl(file, 'full')}
+                      alt={file.name}
+                      className="max-w-full max-h-full object-contain"
+                      onError={(e) => {
+                        const img = e.target as HTMLImageElement;
+                        const fileId = file.id;
+                        if (!img.src.includes('uc?export=view')) {
+                          img.src = `https://drive.google.com/uc?export=view&id=${fileId}`;
+                        } else if (!img.src.includes('thumbnail')) {
+                          img.src = `https://drive.google.com/thumbnail?id=${fileId}&sz=w1920-h1080`;
+                        } else {
+                          img.src = `https://drive.google.com/uc?id=${fileId}`;
+                        }
+                      }}
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={closeModal}
+              className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200"
+            >
+              <X className="w-6 h-6" />
+            </button>
+
+            <button
+              onClick={prevMedia}
+              className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200"
+            >
+              <ChevronLeft className="w-6 h-6" />
+            </button>
+
+            <button
+              onClick={nextMedia}
+              className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200"
+            >
+              <ChevronRight className="w-6 h-6" />
+            </button>
+
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/50 px-6 py-3 rounded-full text-center">
+              <div className="text-sm text-gray-300">
+                {selectedMediaIndex + 1} / {current.length}
+                {file.mimeType.includes('video') && (
+                  <span className="ml-2 text-blue-300">(Video)</span>
+                )}
+              </div>
             </div>
           </div>
-
-          <button
-            onClick={closeModal}
-            className="absolute top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
-          >
-            <X className="w-6 h-6" />
-          </button>
-
-          <button
-            onClick={prevMedia}
-            className="absolute left-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
-          >
-            <ChevronLeft className="w-6 h-6" />
-          </button>
-
-          <button
-            onClick={nextMedia}
-            className="absolute right-6 top-1/2 -translate-y-1/2 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center transition-colors duration-200 pointer-events-auto"
-          >
-            <ChevronRight className="w-6 h-6" />
-          </button>
-
-          {/* Media counter */}
-          <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-black/50 px-6 py-3 rounded-full text-center pointer-events-none">
-            <div className="text-sm text-gray-300">
-              {selectedMediaIndex + 1} / {getCurrentMedia().length}
-              {getCurrentMedia()[selectedMediaIndex].mimeType.includes('video') && (
-                <span className="ml-2 text-blue-300">(Video)</span>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };
