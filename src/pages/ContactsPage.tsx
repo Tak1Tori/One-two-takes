@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import Header from '../components/Header';
 import Footer from '../components/Footer';
-import { Phone, Mail, Instagram, Youtube } from 'lucide-react';
+import { Phone, Mail, Instagram, Youtube,} from 'lucide-react';
 import { useLanguage } from '../contexts/LanguageContext';
 
 const ContactsPage: React.FC = () => {
@@ -126,6 +126,10 @@ Diese Nachricht wurde über das Kontaktformular der Website gesendet.
             <div className="flex items-center gap-4">
               <Mail className="w-5 h-5 md:w-6 md:h-6 text-white flex-shrink-0" />
               <span className="text-lg md:text-xl">Onetwotakes@gmail.com</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <Phone className="w-5 h-5 md:w-6 md:h-6 text-white flex-shrink-0" />
+              <span className="text-lg md:text-xl">+49 176 327 472 66</span>
             </div>
             <div className="flex items-center gap-4">
               <Instagram className="w-5 h-5 md:w-6 md:h-6 text-white flex-shrink-0" />
